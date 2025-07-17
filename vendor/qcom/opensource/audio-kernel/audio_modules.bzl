@@ -581,3 +581,15 @@ audio_modules.register(
     deps = [":%b_swr_dlkm",
 	],
 )
+# >>>> tfa98xx MODULES <<<<
+audio_modules.register(
+    name = "tfa98xx_dlkm",
+    path = ASOC_CODECS_PATH + "/tfa98xx",
+    config_option = "CONFIG_SND_SOC_TFA98XX",
+    srcs = [
+        "tfa98xx.c",
+        "tfa_container.c",
+        "tfa_dsp.c",
+        "tfa_init.c",
+    ]
+)

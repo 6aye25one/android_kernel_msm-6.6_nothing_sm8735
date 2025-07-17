@@ -43,6 +43,7 @@
 #define MIPI_DCS_SET_ARP_OFF 0x60
 #define MIPI_DCS_SET_ARP_ON 0x61
 
+extern unsigned long fp_status;
 u8 dbgfs_tx_cmd_buf[SZ_4K];
 static char dsi_display_primary[MAX_CMDLINE_PARAM_LEN];
 static char dsi_display_secondary[MAX_CMDLINE_PARAM_LEN];
@@ -8192,6 +8193,18 @@ error:
 	return rc;
 }
 
+int dsi_display_set_lhbm_state(struct dsi_display *display, unsigned long fp_status)
+{
+	if (!display) {
+		DSI_ERR("Invalid params\n");
+		return -EINVAL;
+	}
+
+	dsi_panel_set_lhbm_state(display->panel, fp_status);
+
+	return 0;
+}
+
 int dsi_display_set_mode(struct dsi_display *display,
 			 struct dsi_display_mode *mode,
 			 u32 flags)
@@ -8218,6 +8231,11 @@ int dsi_display_set_mode(struct dsi_display *display,
 			rc = -ENOMEM;
 			goto error;
 		}
+	}
+
+	if (display->panel->lhbm_state && mode->timing.refresh_rate != 120) {
+		fp_status = 0;
+		dsi_display_set_lhbm_state(display, 0);
 	}
 
 	rc = dsi_display_restore_bit_clk(display, &adj_mode);

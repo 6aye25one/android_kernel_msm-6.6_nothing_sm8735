@@ -117,3 +117,4 @@ obj-y					+= blink/
 
 # Simple LED drivers
 obj-y					+= simple/
+obj-$(CONFIG_LEDS_MATRIX_LEDS) += matrix-leds/

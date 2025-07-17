@@ -19,6 +19,8 @@
 #include "sde_dsc_helper.h"
 #include "sde_vdc_helper.h"
 #include "sde_hw_catalog.h"
+#include <linux/soc/qcom/nt_display_notifier.h>
+#include "sde_trace.h"
 
 /**
  * topology is currently defined by a set of following 3 values:
@@ -685,7 +687,18 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 
 	if (panel->host_config.ext_bridge_mode)
 		return 0;
-
+	if ((panel->power_mode == SDE_MODE_DPMS_LP1) ||
+		(panel->power_mode == SDE_MODE_DPMS_LP2)) {
+		if (bl_lvl >= 1000) {
+			bl_lvl = 4095;
+		} else if (bl_lvl >= 600) {
+			bl_lvl = 2862;
+		} else {
+			bl_lvl = 16;
+		}
+		DSI_INFO("recovery brightness  %d to aod_level %d\n",
+			panel->bl_config.brightness, bl_lvl);
+	}
 	DSI_DEBUG("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
@@ -734,6 +747,48 @@ static u32 dsi_panel_get_brightness(struct dsi_backlight_config *bl)
 
 	DSI_DEBUG("cur_bl_level=%d\n", cur_bl_level);
 	return cur_bl_level;
+}
+
+int dsi_panel_set_lhbm_state(struct dsi_panel *panel, unsigned long fp_status)
+{
+	int rc = 0;
+	bool update = false;
+
+	if (!panel) {
+		DSI_ERR("invalid params\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&panel->panel_lock);
+	if (panel->panel_initialized) {
+		if (fp_status && !panel->lhbm_state) {
+			SDE_ATRACE_BEGIN("DSI_CMD_SET_LHBM_ON");
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LHBM_ON, false);
+			SDE_ATRACE_END("DSI_CMD_SET_LHBM_ON");
+			panel->lhbm_state = true;
+			update = true;
+			DSI_INFO("open local hbm");
+			if (rc)
+				DSI_ERR("[%s] failed to send DSI_CMD_SET_LHBM_ON cmd, rc=%d\n", panel->name, rc);
+		} else if (!fp_status && panel->lhbm_state) {
+			SDE_ATRACE_BEGIN("DSI_CMD_SET_LHBM_OFF");
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LHBM_OFF, false);
+			SDE_ATRACE_END("DSI_CMD_SET_LHBM_OFF");
+			panel->lhbm_state = false;
+			update = true;
+			DSI_INFO("close local hbm");
+			if (rc)
+				DSI_ERR("[%s] failed to send DSI_CMD_SET_LHBM_OFF cmd, rc=%d\n", panel->name, rc);
+		}
+	} else {
+		panel->lhbm_state = false;
+	}
+	mutex_unlock(&panel->panel_lock);
+
+	if (update)
+		nt_display_update_lcm_state_to_fingerprint(fp_status);
+
+	return rc;
 }
 
 void dsi_panel_bl_handoff(struct dsi_panel *panel)
@@ -2242,6 +2297,11 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-sticky_on_fly-command",
 	"qcom,mdss-dsi-trigger_self_refresh-command",
 	"qcom,mdss-dsi-fps-switch-command",
+	"qcom,mdss-dsi-switch-aod1-command",
+	"qcom,mdss-dsi-switch-aod2-command",
+	"qcom,mdss-dsi-switch-aod3-command",
+	"qcom,mdss-dsi-lhbm-on-command",
+	"qcom,mdss-dsi-lhbm-off-command",
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -2283,6 +2343,11 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-sticky_on_fly-command-state",
 	"qcom,mdss-dsi-trigger_self_refresh-command-state",
 	"qcom,mdss-dsi-fps-switch-command-state",
+	"qcom,mdss-dsi-switch-aod1-command-state",
+	"qcom,mdss-dsi-switch-aod2-command-state",
+	"qcom,mdss-dsi-switch-aod3-command-state",
+	"qcom,mdss-dsi-lhbm-on-command-state",
+	"qcom,mdss-dsi-lhbm-off-command-state",
 };
 
 int dsi_panel_get_cmd_pkt_count(const char *data, u32 length, u32 *cnt)
@@ -4224,7 +4289,9 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		goto error;
 	}
 
-	panel->power_mode = SDE_MODE_DPMS_OFF;
+	panel->power_mode = SDE_MODE_DPMS_ON;
+	/* panel->power_mode = SDE_MODE_DPMS_OFF;@} */
+
 	drm_panel_init(&panel->drm_panel, &panel->mipi_device.dev,
 			NULL, DRM_MODE_CONNECTOR_DSI);
 	panel->mipi_device.dev.of_node = of_node;
@@ -4994,12 +5061,15 @@ error:
 int dsi_panel_set_lp1(struct dsi_panel *panel)
 {
 	int rc = 0;
+	int brightness;
 
 	if (!panel) {
 		DSI_ERR("invalid params\n");
 		return -EINVAL;
 	}
+	DSI_INFO("mode in\n");
 
+	dsi_panel_set_lhbm_state(panel, 0);
 	mutex_lock(&panel->panel_lock);
 	if (!panel->panel_initialized)
 		goto exit;
@@ -5015,10 +5085,17 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 		panel->power_mode != SDE_MODE_DPMS_LP2)
 		dsi_pwr_panel_regulator_mode_set(&panel->power_info,
 			"ibb", REGULATOR_MODE_IDLE);
-	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP1, false);
-	if (rc)
-		DSI_ERR("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
-		       panel->name, rc);
+	brightness = panel->bl_config.brightness;
+	if (brightness >= 1000) {
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_AOD1, false);
+	} else if (brightness >= 600) {
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_AOD2, false);
+	} else {
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_AOD3, false);
+	}
+	DSI_INFO("enter aod, brightness  %d, rc=%d\n",
+		    panel->bl_config.brightness,  rc);
+
 exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
@@ -5072,12 +5149,13 @@ exit:
 int dsi_panel_set_nolp(struct dsi_panel *panel)
 {
 	int rc = 0;
+	int brightness;
 
 	if (!panel) {
 		DSI_ERR("invalid params\n");
 		return -EINVAL;
 	}
-
+	DSI_INFO("in\n");
 	mutex_lock(&panel->panel_lock);
 	if (!panel->panel_initialized)
 		goto exit;
@@ -5090,10 +5168,15 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 	     panel->power_mode == SDE_MODE_DPMS_LP2))
 		dsi_pwr_panel_regulator_mode_set(&panel->power_info,
 			"ibb", REGULATOR_MODE_NORMAL);
+	brightness = panel->bl_config.brightness;
+	rc = dsi_panel_update_backlight(panel, brightness);
+	DSI_INFO("[%s] recovery aod_level to normal %d, rc=%d\n",
+		panel->name, panel->bl_config.brightness, rc);
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP, false);
 	if (rc)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
 		       panel->name, rc);
+
 exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
@@ -5507,7 +5590,7 @@ int dsi_panel_enable(struct dsi_panel *panel)
 		DSI_ERR("Invalid params\n");
 		return -EINVAL;
 	}
-
+	DSI_INFO("in\n");
 	mutex_lock(&panel->panel_lock);
 
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON, false);
@@ -5595,7 +5678,7 @@ int dsi_panel_disable(struct dsi_panel *panel)
 		DSI_ERR("invalid params\n");
 		return -EINVAL;
 	}
-
+	DSI_INFO("in\n");
 	mutex_lock(&panel->panel_lock);
 
 	/* Avoid sending panel off commands when ESD recovery is underway */
@@ -5624,6 +5707,7 @@ int dsi_panel_disable(struct dsi_panel *panel)
 	}
 	panel->panel_initialized = false;
 	panel->power_mode = SDE_MODE_DPMS_OFF;
+	panel->lhbm_state = false;
 
 	mutex_unlock(&panel->panel_lock);
 	return rc;

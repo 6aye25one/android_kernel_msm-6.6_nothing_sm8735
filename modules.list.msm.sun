@@ -117,3 +117,8 @@ qcom-cpufreq-thermal.ko
 gh_virt_wdt.ko
 bcl_pmic5.ko
 qcom-cpufreq-hw.ko
+nothing_writeback_kmsg.ko
+nothing_virtual_ntc.ko
+nothing_error_report.ko
+zsmalloc.ko
+zram.ko
