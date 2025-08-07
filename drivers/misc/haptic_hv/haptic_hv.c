@@ -51,6 +51,7 @@ struct aw_haptic *right;
 #elif defined(AAC_RICHTAP_SUPPORT)
 struct aw_haptic *g_aw_haptic = NULL;
 #endif
+unsigned long nt_pre_arg = 0x80;
 
 static struct proc_dir_entry *haptic_proc_dir = NULL;
 static int index_init = 0;
@@ -1859,6 +1860,7 @@ static void richtap_rtp_work(struct work_struct *work)
 	struct aw_haptic *aw_haptic = container_of(work, struct aw_haptic, richtap_rtp_work);
 	uint32_t retry = 0, tmp_len = 0;
 	uint8_t glb_state_val = 0;
+	nt_pre_arg = 0x80;
 
 	atomic_set(&aw_haptic->richtap_rtp_mode, true);
 	aw_haptic->curr_buf = aw_haptic->start_buf;
@@ -2000,8 +2002,10 @@ static long richtap_file_unlocked_ioctl(struct file *filp, unsigned int cmd, uns
 				arg = 0x80;
 			//aw_haptic->func->enable_gain(aw_haptic, 1);
 			arg = arg * aw_haptic->gain / 127;
-			pr_info("%s richtap set gain:%d arg:%lu\n", __func__, aw_haptic->gain, arg);
-			aw_haptic->func->set_gain(aw_haptic, (uint8_t)arg);
+			if (nt_pre_arg > arg)
+			   nt_pre_arg = arg;
+			pr_info("%s richtap set gain:%d arg:%lu,nt_pre_arg:%lu,min arg:%hhu\n", __func__, aw_haptic->gain, arg, nt_pre_arg,(uint8_t)min(arg, nt_pre_arg));
+			aw_haptic->func->set_gain(aw_haptic, (uint8_t)min(arg, nt_pre_arg));
 			break;
 		case RICHTAP_STREAM_MODE:
 			atomic_set(&aw_haptic->richtap_rtp_mode, false);
