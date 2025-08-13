@@ -10,6 +10,11 @@
 - NOS 3.5(Metroid-V3.5-250719-1646)
   - No update
 
+- NOS 3.5(Metroid-V3.5-250801-1847)
+  - Optimize LED driver
+  - Optimize Charger driver
+  - Optimize WLAN driver
+
 # How do I submit patches to Android Common Kernels
 
 1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
