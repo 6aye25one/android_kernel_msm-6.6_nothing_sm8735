@@ -57,7 +57,7 @@
 #define LEDS_FLASH_PACKET_LENGTH_SPI_LOW			 (4 * 1024 - 4)
 #define LEDS_FLASH_PACKET_LENGTH_SPI				 (32 * 1024 - 16)
 #define LEDS_LTN_FW_VERSION								(0x17)
-#define LEDS_RFD_FW_VERSION								(0x07)
+#define LEDS_RFD_FW_VERSION								(0x0C)
 #define LEDS_LTN_BOOTLOADER_VERSION						(0x01)
 #define LEDS_RFD_BOOTLOADER_VERSION						(0x01)
 
@@ -221,6 +221,11 @@ static int matrix_leds_power_ctrl(
 		return 0;
 	}
 
+	if (matrix_leds->fw_loading == 1) {
+		LOG_INFO("fw loading not power off!\n");
+		return 0;
+	}
+
 	matrix_leds->power_on = on;
 
 #ifdef CONFIG_OF
@@ -246,11 +251,11 @@ static int matrix_leds_power_ctrl(
 		mt_spi_disable_master_clk(matrix_leds->spi_dev);
 	#endif
 	}
-	if (matrix_leds->chip_id_byte == RFD_CHIP_ID) {
-		msleep(500);
-	} else {
+	//if (matrix_leds->chip_id_byte == RFD_CHIP_ID) {
+	//	msleep(500);
+	//} else {
 		msleep(40);
-	}
+	//}
 	return 0;
 #else
 	return 0;
@@ -676,7 +681,7 @@ static int leds_fw_download(const u8 *buf, u32 len, bool status)
 	}
 
 err_fw_download:
-	upg->ts_data->fw_loading = 0;
+	//upg->ts_data->fw_loading = 0;
 	LOG_INFO("leds_fw_download end!");
 	return ret;
 }
@@ -842,23 +847,38 @@ static void matrix_leds_fwupg_work(struct work_struct *work)
 	}
 
 	msleep(1000);
-	if (upg->ts_data->chip_id_byte == LTN_CHIP_ID) {
+	ret = try_compare_fw_version(upg, 10, 1000);
+	if (ret < 0) {
+		matrix_leds_power_ctrl(upg->ts_data, true);
+		msleep(500);
 		ret = try_compare_fw_version(upg, 10, 1000);
 		if (ret < 0) {
-			matrix_leds_power_ctrl(upg->ts_data, true);
-			msleep(500);
-			ret = try_compare_fw_version(upg, 10, 1000);
-			if (ret < 0) {
-				LOG_ERR("firmware upgrade failed after multiple attempts.");
-			}
+			LOG_ERR("firmware upgrade failed after multiple attempts.");
 		}
-	} else if (upg->ts_data->chip_id_byte == RFD_CHIP_ID) {
-		msleep(5000);
 	}
 
 exit:
+	if (upg->ts_data->chip_id_byte == LTN_CHIP_ID) {
+		LOG_INFO("video_data_loaded is %d.\n",upg->ts_data->video_data_loaded);
+		if (!upg->ts_data->video_data_loaded) {
+			const struct leds_video_data *video_data = get_leds_video_data_by_name("LED_FACTORY_VIDEO");
+			if (video_data != NULL) {
+				ret = leds_update_video(upg->ts_data, video_data->data, video_data->size);
+				if (ret < 0) {
+					LOG_ERR("Failed to update video data: %d\n", ret);
+				}
+				upg->ts_data->video_data_loaded = true;
+				LOG_INFO("Video data successfully loaded.\n");
+			} else {
+				LOG_ERR("Failed to find video data by name\n");
+			}
+		} else {
+			LOG_INFO("video data not need update!\n");
+		}
+	}
 	upg->ts_data->bootloader_upgrade = false;
 	upg->ts_data->need_upgrade = LEDS_TRANSMIT_FW_DATA;
+	upg->ts_data->fw_loading = 0;
 	matrix_leds_power_ctrl(upg->ts_data, false);
 
 }
@@ -1094,7 +1114,11 @@ static int leds_update_video(struct matrix_leds_device *matrix_leds, const u8 *b
 		kfree(tx_buf);
 		offset += data_length_bytes;
 		current_packet++;
-		msleep(100);
+		if (matrix_leds->chip_id_byte == LTN_CHIP_ID) {
+			msleep(100);
+		} else {
+			msleep(10);
+		}
 	}
 
 	return 0;
@@ -1228,8 +1252,9 @@ static ssize_t matrix_leds_read_chip_id_show( struct device *dev,
 	ssize_t len = 0;
 	u32 chip_len = 26;
 	u8 *chip_id = NULL;
-	u32 i = 0;
 	int ret = 0;
+	int j = 0;
+	u8 read_chip_id_byte = 0;
 
 	chip_id = kzalloc(chip_len, GFP_KERNEL);
 	if (!chip_id) {
@@ -1245,12 +1270,14 @@ static ssize_t matrix_leds_read_chip_id_show( struct device *dev,
 		return ret;
 	}
 
-	len += snprintf(buf + len, PAGE_SIZE - len, "Chip ID: ");
-	for (i = 0; i < chip_len && i < chip_len; i++) {
-		len += snprintf(buf + len, PAGE_SIZE - len, "%02X ", chip_id[i]);
+	for (j = 0; j < chip_len; j++) {
+		if (chip_id[j] == LTN_CHIP_ID || chip_id[j] == RFD_CHIP_ID) {
+			read_chip_id_byte = chip_id[j];
+			break;
+		}
 	}
-	len += snprintf(buf + len, PAGE_SIZE - len, "\n");
 
+	len += snprintf(buf + len, PAGE_SIZE - len, "Chip ID: %02X\n", read_chip_id_byte);
 	kfree(chip_id);
 	return len;
 }
@@ -1627,7 +1654,7 @@ static ssize_t matrix_leds_video_play_store(struct device *dev,
 	*/
 
 	/* Load and play video */
-	//if (!matrix_leds->video_data_loaded) {
+	if (matrix_leds->chip_id_byte == RFD_CHIP_ID) {
 		const struct leds_video_data *video_data = get_leds_video_data_by_name("LED_FACTORY_VIDEO");
 		if (video_data != NULL) {
 			ret = leds_update_video(matrix_leds, video_data->data, video_data->size);
@@ -1641,9 +1668,25 @@ static ssize_t matrix_leds_video_play_store(struct device *dev,
 			LOG_ERR("Failed to find video data by name\n");
 			goto free_and_exit;
 		}
-	//} else {
-	//	LOG_INFO("video data not need update!\n");
-	//}
+	} else {
+		if (!matrix_leds->video_data_loaded) {
+			const struct leds_video_data *video_data = get_leds_video_data_by_name("LED_FACTORY_VIDEO");
+			if (video_data != NULL) {
+				ret = leds_update_video(matrix_leds, video_data->data, video_data->size);
+				if (ret < 0) {
+					LOG_ERR("Failed to update video data: %d\n", ret);
+					goto free_and_exit;
+				}
+				matrix_leds->video_data_loaded = true;
+				LOG_INFO("Video data successfully loaded.\n");
+			} else {
+				LOG_ERR("Failed to find video data by name\n");
+				goto free_and_exit;
+			}
+		} else {
+			LOG_INFO("video data not need update!\n");
+		}
+	}
 
 	leds_video_play(matrix_leds, val);
 	matrix_leds->video_playing = true;
@@ -2676,7 +2719,8 @@ static int matrix_leds_spi_probe(struct spi_device *spi_dev)
 	matrix_leds->now_brightness = 0;
 	matrix_leds->video_playing = false;
 	matrix_leds->always_on = false;
-	//matrix_leds->video_data_loaded = false;
+	matrix_leds->fw_loading = 0;
+	matrix_leds->video_data_loaded = false;
 	matrix_leds->now_register = LED_CHIP_ID_REG;
 
 	msleep(500);
