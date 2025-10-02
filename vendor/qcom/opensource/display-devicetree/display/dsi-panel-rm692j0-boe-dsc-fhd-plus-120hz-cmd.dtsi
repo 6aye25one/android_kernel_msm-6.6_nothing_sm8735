@@ -211,7 +211,7 @@
 
 				qcom,mdss-dsi-switch-aod1-command = [
 						05 01 00 00 00 00 01 39
-						39 01 00 00 00 00 03 51 0F FE];
+						39 01 00 00 00 00 03 51 0F FF];
 				qcom,mdss-dsi-switch-aod1-command-state = "dsi_lp_mode";
 
 				qcom,mdss-dsi-switch-aod2-command = [
@@ -413,7 +413,7 @@
 
 				qcom,mdss-dsi-switch-aod1-command = [
 						05 01 00 00 00 00 01 39
-						39 01 00 00 00 00 03 51 0F FE];
+						39 01 00 00 00 00 03 51 0F FF];
 				qcom,mdss-dsi-switch-aod1-command-state = "dsi_lp_mode";
 
 				qcom,mdss-dsi-switch-aod2-command = [
@@ -615,7 +615,7 @@
 
 				qcom,mdss-dsi-switch-aod1-command = [
 						05 01 00 00 00 00 01 39
-						39 01 00 00 00 00 03 51 0F FE];
+						39 01 00 00 00 00 03 51 0F FF];
 				qcom,mdss-dsi-switch-aod1-command-state = "dsi_lp_mode";
 
 				qcom,mdss-dsi-switch-aod2-command = [
