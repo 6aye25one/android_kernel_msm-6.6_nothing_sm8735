@@ -1231,7 +1231,7 @@ static int fts_read_parse_touchdata(struct fts_ts_data *ts_data, u8 *touch_buf)
 #endif
 
 #if FTS_FOD_EN
-    if ((ts_data->fod_mode) && (ts_data->fod_mode != FTS_FODOFF_POWERON)) {
+    if (ts_data->fod_mode) {
         if (fts_fod_readdata(ts_data) == FTS_RETVAL_IGNORE_TOUCHES)
             return TOUCH_IGNORE;
     }
