@@ -18,6 +18,14 @@
 - NOS 3.5(Metroid-V3.5-250808_1022)
   - No update
 
+- NOS 3.5(Metroid-V3.5-250829_1700)
+  - Optimize vibator effect
+  - Charger : Add cyclecount node
+  - Update display panel opmanual
+  - Optimize fingerprint unlocking process
+  - Video : Fix recording fail
+  - WLAN : Update prealloc pool
+
 # How do I submit patches to Android Common Kernels
 
 1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
