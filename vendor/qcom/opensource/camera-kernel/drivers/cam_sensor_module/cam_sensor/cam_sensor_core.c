@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -13,6 +13,7 @@
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
 #include "cam_req_mgr_dev.h"
+#include "cam_sensor_nothing.h"
 
 #define CAM_SENSOR_PIPELINE_DELAY_MASK        0xFF
 #define CAM_SENSOR_MODESWITCH_DELAY_SHIFT     8
@@ -355,7 +356,6 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	uint32_t cmd_buf_type, idx;
 	struct cam_config_dev_cmd config;
 	struct i2c_data_settings *i2c_data = NULL;
-	bool is_sensor_read = false;
 
 	ioctl_ctrl = (struct cam_control *)arg;
 
@@ -448,6 +448,7 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 		if (s_ctrl->streamoff_count > 0) {
 			delete_request(&i2c_data->streamoff_settings);
 			s_ctrl->streamoff_count = 0;
+			s_ctrl->is_stream_off_pkt_updated = true;
 		}
 
 		s_ctrl->streamoff_count = s_ctrl->streamoff_count + 1;
@@ -476,8 +477,6 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 			CAM_ERR(CAM_SENSOR, "I/O config is invalid(NULL)");
 			goto end;
 		}
-
-		is_sensor_read = true;
 		break;
 	}
 	case CAM_SENSOR_PACKET_OPCODE_SENSOR_UPDATE: {
@@ -608,18 +607,6 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 			if (rc < 0) {
 				CAM_ERR(CAM_SENSOR, "Fail parsing I2C Pkt: %d", rc);
 				goto end;
-			}
-
-			if ((is_sensor_read) && (io_cfg != NULL)) {
-				mutex_lock(&(s_ctrl->read_buf_lock));
-				rc = cam_sensor_util_add_read_buf_to_list(&(s_ctrl->read_buf_list),
-					io_cfg->mem_handle[0]);
-				if (rc < 0) {
-					CAM_ERR(CAM_SENSOR, "Add read buf to list failed rc:%d", rc);
-					mutex_unlock(&(s_ctrl->read_buf_lock));
-					goto end;
-				}
-				mutex_unlock(&(s_ctrl->read_buf_lock));
 			}
 			break;
 		}
@@ -1261,7 +1248,8 @@ int cam_sensor_stream_off(struct cam_sensor_ctrl_t *s_ctrl)
 		goto end;
 	}
 
-	if (!s_ctrl->stream_off_on_flush &&
+	if ((!s_ctrl->stream_off_on_flush ||
+		s_ctrl->is_stream_off_pkt_updated) &&
 		s_ctrl->i2c_data.streamoff_settings.is_settings_valid &&
 		(s_ctrl->i2c_data.streamoff_settings.request_id == 0)) {
 		rc = cam_sensor_apply_settings(s_ctrl, 0,
@@ -1276,6 +1264,7 @@ int cam_sensor_stream_off(struct cam_sensor_ctrl_t *s_ctrl)
 	s_ctrl->last_flush_req = 0;
 	s_ctrl->sensor_state = CAM_SENSOR_ACQUIRE;
 	s_ctrl->stream_off_on_flush = false;
+	s_ctrl->is_stream_off_pkt_updated = false;
 	memset(s_ctrl->sensor_res, 0, sizeof(s_ctrl->sensor_res));
 
 	CAM_GET_TIMESTAMP(ts);
@@ -1368,6 +1357,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		/* Power up and probe sensor */
 		rc = cam_sensor_power_up(s_ctrl);
 		if (rc < 0) {
+			cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_POWER_ERR);
 			CAM_ERR(CAM_SENSOR,
 				"Power up failed for %s sensor_id: 0x%x, slave_addr: 0x%x",
 				s_ctrl->sensor_name,
@@ -1397,6 +1387,8 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		/* Match sensor ID */
 		rc = cam_sensor_match_id(s_ctrl);
 		if (rc < 0) {
+			cam_nt_sctrl_save(NULL, s_ctrl->soc_info.index);
+			cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_PROBE_ERR);
 			CAM_INFO(CAM_SENSOR,
 				"Probe failed for %s slot:%d, slave_addr:0x%x, sensor_id:0x%x",
 				s_ctrl->sensor_name,
@@ -1437,6 +1429,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		 */
 		s_ctrl->is_probe_succeed = 1;
 		s_ctrl->sensor_state = CAM_SENSOR_INIT;
+
+		cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_PROBE_OK);
+		cam_nt_sctrl_save(s_ctrl, s_ctrl->soc_info.index);
 
 		CAM_INFO(CAM_SENSOR,
 				"Probe success for %s slot:%d,slave_addr:0x%x,sensor_id:0x%x",
@@ -1504,6 +1499,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 
 		rc = cam_sensor_power_up(s_ctrl);
 		if (rc < 0) {
+			cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_POWER_ERR);
 			CAM_ERR(CAM_SENSOR,
 				"Sensor Power up failed for %s sensor_id:0x%x, slave_addr:0x%x",
 				s_ctrl->sensor_name,
@@ -1521,6 +1517,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		s_ctrl->num_batched_frames = 0;
 		s_ctrl->last_applied_done_timestamp = 0;
 		s_ctrl->stream_off_on_flush = false;
+		s_ctrl->is_stream_off_pkt_updated = false;
 		memset(s_ctrl->sensor_res, 0, sizeof(s_ctrl->sensor_res));
 		CAM_INFO(CAM_SENSOR,
 			"CAM_ACQUIRE_DEV Success for %s sensor_id:0x%x,sensor_slave_addr:0x%x",
@@ -1591,6 +1588,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		s_ctrl->last_flush_req = 0;
 		s_ctrl->last_applied_done_timestamp = 0;
 		s_ctrl->stream_off_on_flush = false;
+		s_ctrl->is_stream_off_pkt_updated = false;
 	}
 		break;
 	case CAM_QUERY_CAP: {
@@ -1711,6 +1709,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			s_ctrl->i2c_data.init_settings.request_id = -1;
 
 			if (rc < 0) {
+				cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_INIT_ERR);
 				CAM_ERR(CAM_SENSOR,
 					"%s: cannot apply init settings rc= %d",
 					s_ctrl->sensor_name, rc);
@@ -1742,6 +1741,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			s_ctrl->i2c_data.config_settings.request_id = -1;
 
 			if (rc < 0) {
+				cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_INIT_ERR);
 				CAM_ERR(CAM_SENSOR,
 					"%s: cannot apply config settings",
 					s_ctrl->sensor_name);
@@ -1796,9 +1796,6 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	}
 
 release_mutex:
-	mutex_lock(&(s_ctrl->read_buf_lock));
-	cam_sensor_util_release_read_buf(&(s_ctrl->read_buf_list));
-	mutex_unlock(&(s_ctrl->read_buf_lock));
 	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
 	return rc;
 
@@ -2096,6 +2093,7 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 						&(s_ctrl->io_master_info),
 						i2c_list);
 				if (rc < 0) {
+					cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_I2C_ERR);
 					CAM_ERR(CAM_SENSOR,
 						"Failed to apply settings: %d",
 						rc);
@@ -2137,6 +2135,7 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 						&(s_ctrl->io_master_info),
 						i2c_list);
 				if (rc < 0) {
+					cam_nt_driver_errcode(s_ctrl->soc_info.index, NT_CAM_I2C_ERR);
 					CAM_ERR(CAM_SENSOR,
 						"Failed to apply settings: %d",
 						rc);
@@ -2212,6 +2211,7 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 	}
 
+	cam_nt_do_i2c_info(s_ctrl);
 	return rc;
 }
 

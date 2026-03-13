@@ -3170,6 +3170,7 @@ static void init_cpu_array(void)
 		if (!cpu_array[i])
 			WALT_PANIC(1);
 	}
+	printk_deferred("Init cpu array finish!\n");
 }
 
 static void build_cpu_array(void)
