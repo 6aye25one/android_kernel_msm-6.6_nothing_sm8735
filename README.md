@@ -7,6 +7,11 @@
      - vendor/qcom/proprietary/
      - vendor/qcom/opensource/
 
+- NOS 4.0(Metroid-B4.0-251224-1229)
+  - Enhance sensor stability
+  - msm: ipa: Remove SUSPEND_PREPARE event handling
+  - Enhance IPv6 TCP stability
+
 # How do I submit patches to Android Common Kernels
 
 1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
