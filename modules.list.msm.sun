@@ -122,3 +122,5 @@ nothing_virtual_ntc.ko
 nothing_error_report.ko
 zsmalloc.ko
 zram.ko
+nvmem_qfprom.ko
+qfprom-sys.ko
