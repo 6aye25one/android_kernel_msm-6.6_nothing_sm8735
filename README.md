@@ -17,6 +17,12 @@
   - Enhance wifi stability
   - qcacld-3.0: Remove beacon bit in WOW set by default
 
+- NOS 4.1(Metroid-B4.1-260414-1846)
+  - Merge keystone/android15-6.6-ks-qcom-release.102 (4b70544) into qcom-6.6
+  - Enhance vedio stability
+  - Enhance CMA stability
+  - Enhance system stability
+
 # How do I submit patches to Android Common Kernels
 
 1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
